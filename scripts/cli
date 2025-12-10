@@ -1,0 +1,28 @@
+#!/usr/bin/env python
+import readline
+import rospy
+from std_msgs.msg import String
+
+def main():
+    rospy.init_node('tts_cli', anonymous=True)
+    pub = rospy.Publisher('/say', String, queue_size=10)
+    readline.parse_and_bind('tab: complete')
+    prompt = 'say> '
+    try:
+        while not rospy.is_shutdown():
+            try:
+                line = input(prompt)
+            except (EOFError, KeyboardInterrupt) as e:
+                print(e)
+                break
+            if line is None:
+                break
+            line = line.strip()
+            if not line:
+                continue
+            pub.publish(String(data=line))
+    finally:
+        rospy.signal_shutdown('cli exit')
+
+if __name__ == '__main__':
+    main()

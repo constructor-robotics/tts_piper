@@ -8,7 +8,7 @@ catkin_generate_virtualenv(
   INPUT_REQUIREMENTS requirements.in
 )
 
-catkin_install_python(PROGRAMS scripts/tts
+catkin_install_python(PROGRAMS scripts/tts scripts/cli
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
