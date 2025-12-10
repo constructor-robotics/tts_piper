@@ -1,0 +1,94 @@
+#!/usr/bin/env python
+# author: Michael 'v4hn' Goerner @ 2023
+
+# standalone node for ROS topic->piper.PiperVoice->ROS topic
+
+import rospy
+import rospkg
+from audio_common_msgs.msg import AudioData
+from std_msgs.msg import String as StringMsg
+from std_msgs.msg import Bool as BoolMsg
+
+from piper import PiperVoice, SynthesisConfig
+
+import numpy as np
+import scipy.signal as sps
+
+from threading import Lock, Thread
+from collections import namedtuple
+import io
+import re
+
+class TTSNode:
+    def __init__(self):
+        #model_name = TTS.list_models()[0]
+        model_name = rospy.get_param("~model", f"{rospkg.RosPack().get_path('tts_piper')}/data/en_GB-semaine-medium.onnx")
+        speaker = rospy.get_param("~speaker", "obadiah")
+        
+        self.config = SynthesisConfig()
+        try:
+            self.tts = PiperVoice.load(model_name)
+        except Exception as e:
+            rospy.logfatal(f"Failed to load model from '{model_name}': {e}")
+            raise e
+        if speaker and speaker not in self.tts.config.speaker_id_map:
+            rospy.logerr(f"Speaker '{speaker}' not found in model speakers {self.tts.config.speaker_id_map.keys()}. Using default speaker.")
+        else:
+            self.config.speaker_id = self.tts.config.speaker_id_map[speaker]
+
+        self.pub = rospy.Publisher('audio', AudioData, queue_size=1, latch= False)
+        self.pubStatus = rospy.Publisher('is_speaking', BoolMsg, queue_size=0, latch=True)
+        self.stopTalkingTimer = None
+
+        self.lock = Lock()
+        self.QueueItem = namedtuple('QueueItem', ['msg', 'duration'])
+        self.play_queue = []
+
+        if rospy.get_param('~demo', False):
+            self.demo_speakers()
+        else:
+            self.sub = rospy.Subscriber('say', StringMsg, self.cb, queue_size= 3)
+        rospy.loginfo("TTS initialized")
+
+    def cb(self, msg):
+        sentences = re.split(r'(?<=[.!?]) *', msg.data)
+        for s in sentences:
+            if not re.match('^[ \t\n]*$', s):
+                self.speak(s)
+
+    def speak(self, txt):
+        MODEL_OUTPUT_RATE = 22050
+        OUTPUT_RATE = 16000
+        for chunk in self.tts.synthesize(txt, self.config):
+            duration = len(chunk.audio_int16_array)/MODEL_OUTPUT_RATE
+            # resample as float, then clip/round/cast to int16 to produce valid PCM bytes
+            wav_float = sps.resample(chunk.audio_int16_array.astype(np.float32), int(OUTPUT_RATE*duration))
+            wav_int16 = np.clip(np.round(wav_float), -32768, 32767).astype(np.int16)
+            msg = AudioData(data = wav_int16.tobytes())
+            with self.lock:
+                self.play_queue.append(self.QueueItem(msg, rospy.Duration(duration)))
+                if len(self.play_queue) == 1 and self.stopTalkingTimer is None:
+                    Thread(target= self.talk).start()
+
+    def talk(self):
+        with self.lock:
+            if len(self.play_queue) > 0:
+                item = self.play_queue.pop(0)
+                if self.stopTalkingTimer is not None:
+                    self.stopTalkingTimer.shutdown()
+                self.pubStatus.publish(True)
+                self.pub.publish(item.msg)
+                self.stopTalkingTimer = rospy.Timer(item.duration, self.stoppedTalking, oneshot=True)
+
+    def stoppedTalking(self, event):
+        with self.lock:
+            if len(self.play_queue) > 0:
+                Thread(target= self.talk).start()
+            else:
+                self.pubStatus.publish(False)
+                self.stopTalkingTimer = None
+
+if __name__ == '__main__':
+    rospy.init_node('tts')
+    TTSNode()
+    rospy.spin()

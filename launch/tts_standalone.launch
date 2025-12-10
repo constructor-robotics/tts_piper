@@ -7,5 +7,5 @@
       <param name="sample_rate" value="16000" />
   </node>
 
-  <node pkg="tams_tts" type="tts_node" name="tts" />
+  <include file="$(dirname)/tts.launch" />
 </launch>

@@ -1,4 +1,4 @@
 <?xml version="1.0"?>
 <launch>
-  <node pkg="tams_tts" type="tts_node" name="tts" />
+  <node pkg="tts_piper" type="tts" name="tts" />
 </launch>

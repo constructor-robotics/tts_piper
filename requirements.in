@@ -1,0 +1,2 @@
+piper-tts
+scipy # bookworm version is incompatible with piper-required numpy version
